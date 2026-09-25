@@ -1,4 +1,4 @@
-import {validate} from './engine.mjs';
+import {validate,migrate} from './engine.mjs';
 const enc=new TextEncoder(), dec=new TextDecoder();
 const to64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
 const from64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
@@ -10,7 +10,7 @@ export class Store {
     const copies=[this.storage.getItem(this.key),this.storage.getItem(this.key+'-mirror')];
     if(copies.every(x=>!x))return {state:null,recovered:false};
     const good=[];
-    for(const copy of copies){try{if(!copy)continue;const {data,checksum}=JSON.parse(copy);if(await digest(data)!==checksum)continue;good.push(validate(JSON.parse(data)));}catch{}}
+    for(const copy of copies){try{if(!copy)continue;const {data,checksum}=JSON.parse(copy);if(await digest(data)!==checksum)continue;good.push(migrate(JSON.parse(data)));}catch{}}
     if(!good.length)throw new Error('The saved game cannot be read. Keep this browser data; restore an encrypted backup from the recovery screen.');
     good.sort((a,b)=>b.revision-a.revision);const state=good[0];
     this.lastRevision=state.revision;this.lastId=state.id;
@@ -50,6 +50,6 @@ export async function importBackup(text,password){
     if(b.format!=='villa-traitors-encrypted'||b.version!==1)throw new Error();
     const key=await keyFor(password,from64(b.salt));
     const data=await crypto.subtle.decrypt({name:'AES-GCM',iv:from64(b.iv)},key,from64(b.data));
-    return validate(JSON.parse(dec.decode(data)));
+    return migrate(JSON.parse(dec.decode(data)));
   }catch{throw new Error('Could not restore: check the backup file and its password. Your current game has not been changed.');}
 }

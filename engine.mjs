@@ -1,22 +1,30 @@
 // The complete game rules. No network, UI or account dependencies.
-export const VERSION = 1;
+export const VERSION = 2;
 export const PLAN = [
   {name:'The secret draw', kind:'deal', minutes:15, text:'Pass the phone privately. Everyone gets a role and sets a PIN.'},
-  {name:'Fill the Vault', kind:'mission', minutes:15, text:'Ten cups, one soft ball, two throws per person. Ten successful throws across the group earns 10 prize points. Play on dry ground. Ghosts join in too.'},
-  {name:'Poolside whispers', kind:'break', minutes:45, text:'Swim, snack, make alliances. Be back when the next Circle begins.'},
+  {name:'Let the suspicion begin.', kind:'break', minutes:60, text:'Enjoy the party. Talk, listen and decide who you trust. Gather for the Circle when this timer ends.'},
   {name:'Circle of Shaq · 1', kind:'council', minutes:20},
-  {name:'Bollywood Under Pressure', kind:'mission', minutes:15, text:'Everyone writes a familiar film title. Shuffle, then take turns acting for 30 seconds while the others guess. Swap your own title if you draw it. Eight correct guesses earns 10 prize points. Everyone plays.'},
-  {name:'Trust is a choice', kind:'break', minutes:40, text:'Party time. Compare stories, find allies, or take a break from the game.'},
+  {name:'Who do you trust now?', kind:'break', minutes:55, text:'Back to the party. Compare stories and make your next move. The next Circle starts when this timer ends.'},
   {name:'Circle of Shaq · 2', kind:'council', minutes:20},
-  {name:'The Memory Vault', kind:'mission', minutes:15, text:'Each person contributes one small object. Study them for 20 seconds, cover them, then individually list what you remember in one minute. Eight people remembering ten objects each earns 10 prize points. Everyone plays.'},
-  {name:'The long suspicion', kind:'break', minutes:40, text:'Food, pool time and private conversations. Ghosts can play cup toss or lock in their next-banishment prediction.'},
+  {name:'Everyone has a theory.', kind:'break', minutes:55, text:'Food, pool time and conversations. Keep your suspicions ready for the next Circle.'},
   {name:'Circle of Shaq · 3', kind:'council', minutes:20},
-  {name:'One last alliance', kind:'break', minutes:15, text:'Make your final case. Ghosts stay neutral around surviving players.'},
+  {name:'One last alliance.', kind:'break', minutes:15, text:'A short break before the last Circle. Who deserves your trust?'},
   {name:'Circle of Shaq · 4', kind:'council', minutes:20},
   {name:'The final fire', kind:'finale', minutes:20, text:'End together, or banish again. Final departures keep their roles secret.'}
 ];
 export const alive = s => s.players.filter(p=>p.alive);
 export const player = (s,id) => s.players.find(p=>p.id===id);
+// Merge old mission/break pairs without changing any Circle's scheduled time.
+// Role assignments, accepted ballots, revisions and public results stay intact.
+export function migrate(saved){
+  if(saved?.schema!==1)return validate(saved);
+  const map=[0,1,1,2,3,3,4,5,5,6,7,8,9];
+  if(!Number.isInteger(saved.block)||saved.block<0||saved.block>=map.length)throw new Error('The old schedule cannot be read.');
+  const next=structuredClone(saved);
+  next.schema=VERSION;next.block=map[saved.block];
+  delete next.pot;delete next.completedMissions;
+  return validate(next);
+}
 const requireThat = (ok,msg) => { if (!ok) throw new Error(msg); };
 export function randomIndex(length) {
   requireThat(Number.isInteger(length)&&length>0,'No choices available.');
@@ -41,7 +49,7 @@ export function createGame(names, {duration=300, start=Date.now(), rehearsal=fal
     schema:VERSION, id:crypto.randomUUID(), revision:0, created:Date.now(), start,
     duration, rehearsal, players:cleaned.map((name,i)=>({id:i+1,name,role:roles[i],alive:true,pinHash:null,dealt:false,publicRole:null,exit:null})),
     phase:'deal', block:0, round:0, final:false, ballot:{}, runoff:0, candidates:[],
-    result:null, history:[], pot:0, completedMissions:[], shift:0, pausedAt:null,
+    result:null, history:[], shift:0, pausedAt:null,
     phaseAt:Date.now(), winner:null, winners:[], finalCycle:0
   };
 }
@@ -112,12 +120,6 @@ export function reduce(state,action,rng=randomIndex){
       log(s,'All roles accepted. The game begins.');beginBlock(s,1);break;
     case 'next':
       requireThat(s.phase==='activity','Finish the current round before continuing.');
-      if(PLAN[s.block].kind==='mission'){
-        requireThat(typeof a.success==='boolean','Record whether the mission succeeded.');
-        requireThat(!s.completedMissions.includes(s.block),'This mission was already recorded.');
-        s.completedMissions.push(s.block);if(a.success)s.pot+=10;
-        log(s,`${PLAN[s.block].name}: ${a.success?'completed · +10 prize points':'finished · no points'}.`);
-      }
       beginBlock(s,s.block+1);break;
     case 'openVote':
       requireThat(s.phase==='discussion','Discussion must come before voting.');
@@ -212,10 +214,10 @@ export function validate(s){
   requireThat(s.players.every(p=>Number.isInteger(p.id)&&typeof p.name==='string'&&p.name.length<=24&&['traitor','innocent'].includes(p.role)&&typeof p.alive==='boolean'&&typeof p.dealt==='boolean'&&(!p.dealt||/^[a-f0-9]{64}$/.test(p.pinHash))&&[null,'traitor','innocent'].includes(p.publicRole)),'A player record is invalid.');
   requireThat(['deal','activity','discussion','vote','night','decision','voteResult','murderResult','decisionResult','withdrawalResult','ended'].includes(s.phase),'Unknown game phase.');
   requireThat(Number.isInteger(s.block)&&s.block>=0&&s.block<PLAN.length&&Number.isInteger(s.revision)&&s.revision>=0,'The round record is invalid.');
-  requireThat(Number.isFinite(s.start)&&Number.isFinite(s.shift)&&[240,270,300].includes(s.duration)&&Array.isArray(s.history)&&Array.isArray(s.completedMissions),'The schedule is invalid.');
+  requireThat(Number.isFinite(s.start)&&Number.isFinite(s.shift)&&[240,270,300].includes(s.duration)&&Array.isArray(s.history),'The schedule is invalid.');
   requireThat(s.ballot&&typeof s.ballot==='object'&&!Array.isArray(s.ballot),'The ballot record is invalid.');
   requireThat(typeof s.final==='boolean'&&Number.isInteger(s.round)&&s.round>=0&&s.round<=4&&[0,1].includes(s.runoff)&&Array.isArray(s.candidates),'The round settings are invalid.');
-  requireThat(Number.isFinite(s.phaseAt)&&(s.pausedAt===null||Number.isFinite(s.pausedAt))&&Number.isInteger(s.pot)&&s.pot>=0&&s.pot<=30,'The timing or prize record is invalid.');
+  requireThat(Number.isFinite(s.phaseAt)&&(s.pausedAt===null||Number.isFinite(s.pausedAt)),'The timing record is invalid.');
   requireThat(s.history.every(h=>h&&typeof h.text==='string'&&Number.isFinite(h.at)&&(h.detail===null||typeof h.detail==='object')),'The public history is invalid.');
   requireThat(s.players.every(p=>(p.publicRole===null||p.publicRole===p.role)&&(!p.alive||p.exit===null)),'The public role record is invalid.');
   if(['voteResult','murderResult','decisionResult','withdrawalResult'].includes(s.phase)){
